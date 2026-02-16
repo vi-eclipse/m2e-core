@@ -113,6 +113,7 @@ public class MavenTargetLocation extends AbstractBundleContainer {
 	public static final String ATTRIBUTE_DEPENDENCY_SCOPES = "includeDependencyScopes";
 	public static final String ATTRIBUTE_INCLUDE_SOURCE = "includeSource";
 	public static final String ATTRIBUTE_MISSING_META_DATA = "missingManifest";
+	public static final String ATTRIBUTE_MANIFEST_OVERRIDE = "manifestOverride";
 	public static final List<String> DEFAULT_DEPENDENCY_SCOPES = List
 			.of(org.apache.maven.artifact.Artifact.SCOPE_COMPILE);
 	public static final MissingMetadataMode DEFAULT_METADATA_MODE = MissingMetadataMode.GENERATE;
@@ -130,6 +131,7 @@ public class MavenTargetLocation extends AbstractBundleContainer {
 	private final Set<Artifact> failedArtifacts = new HashSet<>();
 	private final Map<String, BNDInstructions> instructionsMap = new LinkedHashMap<>();
 	private final boolean includeSource;
+	private final boolean manifestOverride;
 	private final List<MavenTargetDependency> roots;
 	private final List<MavenTargetRepository> extraRepositories;
 	private final IFeature featureTemplate;
@@ -139,15 +141,18 @@ public class MavenTargetLocation extends AbstractBundleContainer {
 	public MavenTargetLocation(String label, Collection<MavenTargetDependency> rootDependecies,
 			Collection<MavenTargetRepository> extraRepositories, MissingMetadataMode metadataMode,
 			DependencyDepth dependencyDepth, Collection<String> dependencyScopes, boolean includeSource,
-			Collection<BNDInstructions> instructions, Collection<String> excludes, IFeature featureTemplate) {
+			boolean manifestOverride, Collection<BNDInstructions> instructions, Collection<String> excludes,
+			IFeature featureTemplate) {
 		this.label = label;
 		this.dependencyDepth = dependencyDepth;
 		this.featureTemplate = featureTemplate;
-		this.roots = new ArrayList<>(rootDependecies);
+		roots = new ArrayList<>(rootDependecies);
 		this.extraRepositories = Collections.unmodifiableList(new ArrayList<>(extraRepositories));
 		this.metadataMode = metadataMode;
 		this.dependencyScopes = dependencyScopes;
 		this.includeSource = includeSource;
+		this.manifestOverride = manifestOverride;
+
 		for (BNDInstructions instr : instructions) {
 			instructionsMap.put(instr.key(), instr);
 		}
@@ -233,7 +238,7 @@ public class MavenTargetLocation extends AbstractBundleContainer {
 
 	private Artifact resolveDependency(MavenTargetDependency root, IMaven maven, List<ArtifactRepository> repositories,
 			TargetBundles targetBundles, CacheManager cacheManager, IProgressMonitor monitor) throws CoreException {
-		SubMonitor subMonitor = SubMonitor.convert(monitor, 100); 
+		SubMonitor subMonitor = SubMonitor.convert(monitor, 100);
 		IMavenProjectRegistry registry = MavenPlugin.getMavenProjectRegistry();
 		IMavenProjectFacade workspaceProject = registry.getMavenProject(root.getGroupId(), root.getArtifactId(),
 				root.getVersion());
@@ -248,8 +253,7 @@ public class MavenTargetLocation extends AbstractBundleContainer {
 		if (artifact != null) {
 			MavenRootDependency dependency = new MavenRootDependency(artifact.getGroupId(), artifact.getArtifactId(),
 					artifact.getVersion(), artifact.getClassifier(), artifact.getExtension());
-			DependencyDepth depth = MavenDependencyCollector.getEffectiveDepth(dependency,
-					dependencyDepth);
+			DependencyDepth depth = MavenDependencyCollector.getEffectiveDepth(dependency, dependencyDepth);
 			SubMonitor split = subMonitor.split(20);
 			if (depth == DependencyDepth.DIRECT || depth == DependencyDepth.INFINITE) {
 				// We should resolve the main artifact from the collector, but because this
@@ -396,7 +400,7 @@ public class MavenTargetLocation extends AbstractBundleContainer {
 							maven.resolve(artifact.getGroupId(), artifact.getArtifactId(), artifact.getBaseVersion(),
 									artifact.getExtension(), "sources", repositories, new NullProgressMonitor()));
 					MavenSourceBundle sourceBundle = new MavenSourceBundle(bundle.getBundleInfo(), sourceArtifact,
-							cacheManager);
+							cacheManager, manifestOverride);
 					targetBundles.addBundle(sourceArtifact, sourceBundle);
 					targetBundles.addSourceBundle(artifact, sourceBundle);
 				} catch (Exception e) {
@@ -442,7 +446,8 @@ public class MavenTargetLocation extends AbstractBundleContainer {
 		}
 
 		return new MavenTargetLocation(label, latest, extraRepositories, metadataMode, dependencyDepth,
-				dependencyScopes, includeSource, instructionsMap.values(), excludedArtifacts, featureTemplate);
+				dependencyScopes, includeSource, manifestOverride, instructionsMap.values(), excludedArtifacts,
+				featureTemplate);
 	}
 
 	public MavenTargetDependency update(MavenTargetDependency source, IProgressMonitor monitor) throws CoreException {
@@ -564,6 +569,10 @@ public class MavenTargetLocation extends AbstractBundleContainer {
 		return includeSource;
 	}
 
+	public boolean isManifestOverride() {
+		return manifestOverride;
+	}
+
 	@Override
 	public String serialize() {
 		StringBuilder xml = new StringBuilder();
@@ -573,6 +582,7 @@ public class MavenTargetLocation extends AbstractBundleContainer {
 		attribute(xml, ATTRIBUTE_DEPENDENCY_SCOPES, dependencyScopes.stream().collect(Collectors.joining(",")));
 		attribute(xml, ATTRIBUTE_DEPENDENCY_DEPTH, dependencyDepth.name().toLowerCase());
 		attribute(xml, ATTRIBUTE_INCLUDE_SOURCE, includeSource ? "true" : "");
+		attribute(xml, ATTRIBUTE_MANIFEST_OVERRIDE, manifestOverride ? "true" : "");
 		attribute(xml, "type", getType());
 		xml.append(">");
 		if (featureTemplate != null) {
@@ -710,14 +720,14 @@ public class MavenTargetLocation extends AbstractBundleContainer {
 
 	public MavenTargetLocation withInstructions(Collection<BNDInstructions> instructions) {
 		return new MavenTargetLocation(label, roots.stream().map(MavenTargetDependency::copy).toList(),
-				extraRepositories, metadataMode, dependencyDepth, dependencyScopes, includeSource, instructions,
-				excludedArtifacts, featureTemplate);
+				extraRepositories, metadataMode, dependencyDepth, dependencyScopes, includeSource, manifestOverride,
+				instructions, excludedArtifacts, featureTemplate);
 	}
 
 	public MavenTargetLocation withoutRoot(MavenTargetDependency toRemove) {
 		return new MavenTargetLocation(label,
 				roots.stream().filter(root -> root != toRemove).map(root -> root.copy()).collect(Collectors.toList()),
-				extraRepositories, metadataMode, dependencyDepth, dependencyScopes, includeSource,
+				extraRepositories, metadataMode, dependencyDepth, dependencyScopes, includeSource, manifestOverride,
 				instructionsMap.values(), excludedArtifacts, featureTemplate);
 	}
 

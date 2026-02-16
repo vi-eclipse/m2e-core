@@ -24,8 +24,9 @@ import org.eclipse.pde.core.target.TargetBundle;
 
 public class MavenSourceBundle extends TargetBundle {
 
-	public MavenSourceBundle(BundleInfo sourceTarget, Artifact artifact, CacheManager cacheManager) throws Exception {
-		this.fSourceTarget = sourceTarget;
+	public MavenSourceBundle(BundleInfo sourceTarget, Artifact artifact, CacheManager cacheManager,
+			boolean manifestOverride) throws Exception {
+		fSourceTarget = sourceTarget;
 		String symbolicName = sourceTarget.getSymbolicName();
 		String version = sourceTarget.getVersion();
 		fInfo.setSymbolicName(MavenBundleWrapper.getSourceBundleName(symbolicName));
@@ -35,11 +36,11 @@ public class MavenSourceBundle extends TargetBundle {
 		try (JarFile jar = new JarFile(sourceFile)) {
 			manifest = Objects.requireNonNullElseGet(jar.getManifest(), Manifest::new);
 		}
-		if (MavenBundleWrapper.isValidSourceManifest(manifest)) {
+		if (!manifestOverride && MavenBundleWrapper.isValidSourceManifest(manifest)) {
 			fInfo.setLocation(sourceFile.toURI());
 		} else {
 			File generatedSourceBundle = cacheManager.accessArtifactFile(artifact, file -> {
-				if (CacheManager.isOutdated(file, sourceFile)) {
+				if (manifestOverride || CacheManager.isOutdated(file, sourceFile)) {
 					MavenBundleWrapper.addSourceBundleMetadata(manifest, symbolicName, version);
 					MavenBundleWrapper.transferJarEntries(sourceFile, manifest, file);
 				}
@@ -48,6 +49,5 @@ public class MavenSourceBundle extends TargetBundle {
 			fInfo.setLocation(generatedSourceBundle.toURI());
 		}
 	}
-
 
 }
